@@ -1,6 +1,8 @@
 ---
-title: "Practical 6"
-output: html_notebook
+title: "Practical6"
+output:
+  html_document:
+    df_print: paged
 ---
 
 Ref URLs:  
@@ -9,7 +11,7 @@ http://openplaques.org/
 
 ### An Introduction to Analysing Spatial Patterns
 
-#### Point Pattern Analysis 
+#### 1. Point Pattern Analysis 
 
 The question we want to answer is: *“For any given London Borough, are the Blue Plaques within that borough distributed randomly or do they exhibit some kind of dispersed or clustered pattern?”*
 
@@ -255,6 +257,7 @@ Quadrat and Ripley’s K analysis are useful exploratory techniques for telling 
 
 *libraries*
 ```{r}
+#install.packages("fpc")
 library(raster)
 library(fpc)
 library(plyr)
@@ -312,4 +315,217 @@ dbplot <- dbplot + geom_polygon(data = chulls, aes(coords.x1,coords.x2, group=cl
 #now plot, setting the coordinates to scale correctly and as a black and white plot (just for the hell of it)...
 dbplot + theme_bw() + coord_equal()
 ```
+
+#### 2. Analysing Spatial Autocorrelation with Moran’s I, LISA and friends
+
+*libraries*
+```{r}
+library(rgdal)
+```
+
+Load London Wards
+```{r}
+LondonWards <- readOGR("/Volumes/ucfnnap/CASA_GIS and Sc/wk6/LondonWardData/LondonWards.shp", layer="LondonWards")
+```
+
+```{r}
+#it's probably projected correctly, but in case it isn't give it a projection using the CRS() function in the raster package
+proj4string(LondonWards) <- CRS("+init=epsg:27700")
+```
+
+Have a look to check that everything looks OK..
+```{r}
+tmap_mode("view")
+BluePlaquesSub <- BluePlaques[LondonWards,]
+tm_shape(LondonWards) +
+  tm_polygons(col = NA, alpha = 0.5) +
+tm_shape(BluePlaquesSub) +
+  tm_dots(col = "blue")
+```
+
+The measures of spatial autocorrelation that we will be using require continuous observations (counts of blue plaques, average GCSE scores, average incomes etc.) to be spatially referenced (i.e. attached to a spatial unit like a ward or a borough). The file you have already has the various obervations associated with the London Ward data file already attached to it, but let’s continue with our blue plaques example for now.  
+
+To create a continuous observation from the blue plaques data we need to count all of the blue plaques that fall within each Ward in the City. Luckily, we can do this using the poly.counts function in Chris Brunsdon’s excellent gistools package… (we could also use the over() function in the sp package if we wanted)  
+```{r}
+res <- poly.counts(BluePlaquesSub, LondonWards)
+#and add this as a column in our spatialPolygonsDataframe
+LondonWards@data$BluePlaqueCount<-res
+#as the wards are of different sizes, perhaps best that we calculate a density
+LondonWards@data$BlueDensity <- LondonWards$BluePlaqueCount*100000/poly.areas(LondonWards)
+#let's just check the data to see if the calculations have worked
+LondonWards@data
+```
+
+How about a quick choropleth map to see how we are getting on…
+```{r}
+tm_shape(LondonWards) +
+    tm_polygons("BlueDensity",
+        style="jenks",
+        palette="PuOr",
+        midpoint=NA,
+        title="Blue Plaque Density")
+```
+
+So, from the map, it looks as though we might have some clustering of blue plaques in the centre of London so let’s check this with Moran’s I and some other statistics.  
+
+Before being able to calculate Moran’s I and any similar statistics, we need to first define a Wij spatial weights matrix
+```{r}
+library(spdep)
+#####
+#First calculate the centroids of all Wards in London
+coordsW <- coordinates(LondonWards)
+plot(coordsW)
+```
+
+```{r}
+#Now we need to generate a spatial weights matrix (remember from the lecture). We'll start with a simple binary matrix of queen's case neighbours
+#create a neighbours list
+LWard_nb <- poly2nb(LondonWards, queen=T)
+#plot them
+plot(LWard_nb, coordinates(coordsW), col="red")
+#add a map underneath
+plot(LondonWards, add=T)
+```
+
+```{r}
+# create a spatial weights object from these weights
+# C is globally standardised (sums over all links to n)
+Lward.lw <- nb2listw(LWard_nb, style="C")
+head(Lward.lw$neighbours)
+```
+
+Now we have defined our Wij matrix, we can calculate the Moran’s I and other associated statistics
+
+```{r}
+#moran's I test - this tells us whether we have clustered values (close to 1) or dispersed values (close to -1)
+#we will calculate for the densities rather than raw values
+I_LWard_Global_Density <- moran.test(LondonWards@data$BlueDensity, Lward.lw)
+I_LWard_Global_Density
+```
+
+```{r}
+#Geary's C as well..? This tells us whether similar values or dissimilar values are clustering
+C_LWard_Global_Density <- geary.test(LondonWards@data$BlueDensity, Lward.lw)
+C_LWard_Global_Density
+```
+
+```{r}
+##Getis Ord General G...? This tells us whether high or low values are clustering. If G > Expected = High values clustering; if G < expected = low values clustering
+G_LWard_Global_Density <- globalG.test(LondonWards@data$BlueDensity, Lward.lw)
+G_LWard_Global_Density
+```
+
+So the global statistics are indicating that we have spatial autocorrelation of Blue Plaques in London:  
+
+The Moran’s I statistic = 0.51 (remember 1 = clustered, 0 = no pattern, -1 = dispersed) which shows that we have some distinctive clustering  
+
+The Geary’s C statistic = 0.41 (remember Geary’s C falls between 0 and 2; 1 means no spatial autocorrelation, <1 - positive spatial autocorrelation or similar values clustering, >1 - negative spatial autocorreation or dissimilar values clustering) which shows that similar values are clustering  
+
+The General G statistic = G > expected, so high values are tending to cluster.  
+
+We can now also calculate local versions of the Moran’s I statistic (for each Ward) and a Getis Ord G∗i statistic to see where we have hot-spots…  
+```{r}
+#use the localmoran function to generate I for each ward in the city
+I_LWard_Local <- localmoran(LondonWards@data$BluePlaqueCount, Lward.lw)
+I_LWard_Local_Density <- localmoran(LondonWards@data$BlueDensity, Lward.lw)
+#what does the output (the localMoran object) look like?
+head(I_LWard_Local_Density)
+```
+
+```{r}
+#There are 5 columns of data. We want to copy some of the columns (the I score (column 1) and the z-score standard deviation (column 4)) back into the LondonWards spatialPolygonsDataframe
+LondonWards@data$BLocI <- I_LWard_Local[,1]
+LondonWards@data$BLocIz <- I_LWard_Local[,4]
+LondonWards@data$BLocIR <- I_LWard_Local_Density[,1]
+LondonWards@data$BLocIRz <- I_LWard_Local_Density[,4]
+```
+
+No we can plot a map of the local Moran’s I outputs…
+```{r}
+#set the breaks manually based on the rule that data points >2.58 or <-2.58 standard deviations away from the mean are significant at the 99% level (<1% chance that autocorrelation not present); >1.96 - <2.58 or <-1.96 to >-2.58 standard deviations are significant at the 95% level (<5% change that autocorrelation not present). >1.65 = 90% etc.
+breaks1<-c(-1000,-2.58,-1.96,-1.65,1.65,1.96,2.58,1000)
+#create a new diverging colour brewer palette and reverse the order using rev so higher values correspond to red
+MoranColours<- rev(brewer.pal(8, "RdGy"))
+
+#now plot on an interactive map
+tm_shape(LondonWards) +
+    tm_polygons("BLocIRz",
+        style="fixed",
+        breaks=breaks1,
+        palette=MoranColours,
+        midpoint=NA,
+        title="Local Moran's I, Blue Plaques in London")
+```
+
+This map shows some areas in the centre of London that have relatively high scores, indicating areas with lots of blue plaques neighbouring other areas with lots of blue plaques.  
+
+What about the Getis Ord G∗i statisic for hot and cold spots?  
+```{r}
+Gi_LWard_Local_Density <- localG(LondonWards@data$BlueDensity, Lward.lw)
+#Check the help file  (?localG) to see what a localG object looks like - it is a bit different from a localMoran object as it only contains just a single value - the z-score (standardised value relating to whether high values or low values are clustering together)
+head(Gi_LWard_Local_Density)
+```
+
+```{r}
+LondonWards@data$BLocGiRz <- Gi_LWard_Local_Density
+```
+
+And map the outputs…
+
+```{r}
+GIColours<- rev(brewer.pal(8, "RdBu"))
+
+#now plot on an interactive map
+tm_shape(LondonWards) +
+    tm_polygons("BLocGiRz",
+        style="fixed",
+        breaks=breaks1,
+        palette=GIColours,
+        midpoint=NA,
+        title="Gi*, Blue Plaques in London")
+```
+
+The local Moran’s I and G∗i statistics for wards clearly show that the density of blue plaques in the centre of the city exhibits strong (and postitive) spatial autocorrelation, but neither of these maps are very interesting. The ArcGIS crew will have been calculating Local Moran’s I and G∗i statistics for some of the other variables in the LondonWards dataset. Why not try some alternative variables and see what patterns emerge… here I’m going to have a look at Average GSCE scores…  
+```{r}
+#use head to see what other variables are in the data file
+head(LondonWards@data)
+```
+
+```{r}
+#ok I am going to have a look at Average GSCE Scores. First local Moran's I...
+I_LWard_Local_GCSE <- localmoran(LondonWards@data$AvgGCSE201, Lward.lw)
+LondonWards@data$GCSE_LocIz <- I_LWard_Local_GCSE[,4]
+
+tm_shape(LondonWards) +
+    tm_polygons("GCSE_LocIz",
+        style="fixed",
+        breaks=breaks1,
+        palette=MoranColours,
+        midpoint=NA,
+        title="Local Moran's I, GCSE Scores")
+```
+
+```{r}
+#Now the Gi* statistic to look at clusters of high and low scores...
+Gi_LWard_Local_GCSE <- localG(LondonWards@data$AvgGCSE201, Lward.lw)
+LondonWards@data$GCSE_LocGiz <- Gi_LWard_Local_GCSE
+
+tm_shape(LondonWards) +
+    tm_polygons("GCSE_LocGiz",
+        style="fixed",
+        breaks=breaks1,
+        palette=GIColours,
+        midpoint=NA,
+        title="Gi*, GCSE Scores")
+```
+
+So this is the end of the practical. Hopefully you have learned a lot about the different methods we can employ to analyse patterns in spatial data.  
+
+This practical was deliberately designed as a walk through, but this may have given you ideas about where you could perhaps take these techniques in your coursework if this is something you wanted to explore further with different data or in different contexts.  
+
+Things to perhaps try as an extension…  
+
+We have used sp objects in this practical (because I wrote it before sf became the defacto spatial data type in R). Can you convert some of this so it works withsf?  
+Could you atomate any of the functions so that you could quickly produce maps of any of the variables in the LondonWards dataset?  
+Could you get these outputs into a faceted ggplot2 map?  
 

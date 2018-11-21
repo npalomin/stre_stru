@@ -1,0 +1,147 @@
+---
+title: "Practical7"
+output:
+  html_document:
+    df_print: paged
+---
+
+#### Treasure Hunt Trace
+```{r}
+library(tmap)
+library(geojsonio)
+
+#Here's their data:
+hunt <- geojson_read("https://www.dropbox.com/s/wa2ip35tcmt93g3/Team7.geojson?raw=1", what = "sp")
+
+#And here's where they went...
+tmap_mode("view")
+tm_shape(hunt) +
+  tm_lines(col = "green", lwd = 4)
+```
+
+#### The location of Tube / Rail Stations in London
+```{r message=FALSE, warning=FALSE, paged.print=TRUE}
+#You can have this for free, R fans. Reading XML can be a pain in R, you will need the 'layer' information, which is contained in the <name> tag in a KML file...
+#install.packages("rgdal")
+library(rgdal)
+tubestations <- readOGR("https://www.doogal.co.uk/LondonStationsKML.ashx", "London stations with zone information")
+```
+
+#### Treasure Hunt Locations
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+library(tidyverse)
+
+huntaddresses <- read_csv("https://www.dropbox.com/s/v66l4cx7aia9jlo/huntLocations.csv?raw=1")
+```
+
+#### Geocode with Google Maps API
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+#code here lifted directly from - https://gist.github.com/josecarlosgonz/6417633 
+
+#library the required packages
+#install.packages("RCurl")
+#install.packages("RJSONIO")
+#install.packages("plyr")
+#install.packages("tidyverse")
+library(RCurl)
+library(RJSONIO)
+library(plyr)
+library(tidyverse)
+
+#highlight this whole block and create this function to access the Google Places API
+url <- function(address, return.call = "json", sensor = "false") {
+  root <- "http://maps.google.com/maps/api/geocode/"
+  u <- paste(root, return.call, "?address=", address, "&sensor=", sensor, sep = "")
+  return(URLencode(u))
+}
+
+#highlight this whole block and create this function to geocode some places just from a random list of treasure hunt locations
+geoCode <- function(address,verbose=FALSE) {
+  if(verbose) cat(address,"\n")
+  u <- url(address)
+  doc <- getURL(u)
+  x <- fromJSON(doc,simplify = FALSE)
+  if(x$status=="OK") {
+    lat <- x$results[[1]]$geometry$location$lat
+    lng <- x$results[[1]]$geometry$location$lng
+    location_type  <- x$results[[1]]$geometry$location_type
+    formatted_address  <- x$results[[1]]$formatted_address
+    return(c(lat, lng, location_type, formatted_address))
+    Sys.sleep(0.5)
+  } else {
+    return(c(NA,NA,NA, NA))
+  }
+}
+
+#now use the geoCode() function (which calls the URL function) to geocode our list of places
+
+#for loop to cycle through every treasure hunt location
+i=1
+for(i in 1:nrow(huntaddresses)){
+  # Every nine records, pause 3 seconds so that the API doesn't kick us off...
+  if(i %% 9 == 0) Sys.sleep(3)
+  #now create a temporary list of useful elements 
+  tempdf <- as.list(geoCode(huntaddresses[i,1]))
+  #and write these back into our dataframe
+  huntaddresses[i,3] <- tempdf[1]
+  huntaddresses[i,4] <- tempdf[2]
+  huntaddresses[i,5] <- tempdf[4]
+}
+
+# rename the columns
+names(huntaddresses)  <- c("Location","Points","lat","lon","GoogleAddress")
+head(huntaddresses)
+
+#write a new .csv file to your working directory
+write_csv(huntaddresses, "huntaddresses.csv")
+```
+
+#### Merge City of London Wards into a Single zone
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+library(sf)
+library(plyr)
+```
+
+```{r}
+library(rgdal)
+#Download the Ward Boundaries from Moodle
+LondonWards <- readOGR("/Volumes/ucfnnap/CASA_GIS and Sc/wk7/LondonWardsBoundaries/LondonWardsNew.shp")
+tmap_mode("view")
+qtm(LondonWards)
+```
+
+```{r}
+LondonWardsSF <- st_as_sf(LondonWards)
+
+#cut the city out - this just happens to be the first 25 rows, usefully!
+city <- LondonWardsSF[1:25,]
+# city$agg  <- 1
+LondonWardsSF <- LondonWardsSF[26:649,]
+
+#merge all of the boundaries together so we've got a single object
+############### cityagg <- city %>% group_by(city$agg) %>% summarise()
+cityagg <- st_union(city)
+
+# #disolve the ward boundaries and just leave the first one as the city of London
+# LondonWards_dis <- aggregate(LondonWardsSF, by = LondonWardsSF, FUN = first)
+# 
+# #merge them back together into a new object
+
+LondonWards_new <- st_union(LondonWardsSF, cityagg)
+
+plot(LondonWards_new)
+```
+
+```{r}
+qtm(LondonWards_new)
+```
+
+```{r}
+#finally, update the codes for the city of London so that they match your 
+LondonWards_new[1,2] <- as.character("E09000001")
+LondonWards_new[1,3] <- as.character("00AA")
+
+LondonWards_new[1,4] <- as.character("City of London")
+```
+
