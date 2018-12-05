@@ -1,0 +1,445 @@
+---
+title: "Practical9"
+output: html_notebook
+---
+
+##### Spatial Inferential Statistics
+Task 1 - A non-parametric test
+
+*libraries*
+```{r message=FALSE, warning=FALSE}
+library(rgdal)
+library(tidyverse)
+library(sf)
+library(ggplot2)
+```
+
+```{r}
+LondonWardsSF <- st_as_sf(LondonWards)
+extradata <- read_csv("https://www.dropbox.com/s/qay9q1jwpffxcqj/LondonAdditionalDataFixed.csv?raw=1")
+LondonWardsSF <- merge(LondonWardsSF, extradata, by.x = "WD11CD", by.y = "Wardcode")
+```
+
+```{r}
+newvar<-0
+recode<-function(variable,high,medium,low){
+  newvar[variable<=high]<-"High"
+  newvar[variable<=medium]<-"Medium"
+  newvar[variable<=low]<-"Low"
+  return(newvar)
+}
+```
+
+```{r}
+summary(LondonWardsSF$AvgGCSE201)
+```
+
+```{r}
+summary(LondonWardsSF$UnauthAbse)
+```
+
+```{r}
+attach(LondonWardsSF)
+LondonWardsSF$GCSE_recode <- recode(AvgGCSE201,409.1,358.3,332.3)
+LondonWardsSF$unauth_recode <- recode(UnauthAbse,2.4675,1.4105,0.8215)
+```
+
+H0  = “There is no relationship between low average GCSE scores in London wards and high levels of unauthorised school absence.”
+
+Can we reject this null hypothsis by running a chi-squared test?
+
+```{r}
+##what does a cross tabulation of the data look like?
+
+chisq<-chisq.test(LondonWardsSF$GCSE_recode,LondonWardsSF$unauth_recode)
+#observed counts
+chisq$observed
+```
+
+```{r}
+#expected counts
+chisq$expected
+```
+
+```{r}
+#chi squared statistic
+chisq$statistic
+```
+
+```{r}
+#p-value
+chisq$p.value
+```
+
+It would appear that our p-value is very close to 0 - certainly much less than the 0.05 (95%) or 0.01 (99%) significance level we would normally use. This tells us that there is a much < 1% chance that there is no relationship between being absent from school and the average grades you get for people living in Wards across London.
+
+Task 2: A Parametric Test - a linear regression model
+
+1. Examine the frequency distributions in your data
+```{r}
+varlist <- data.frame(cbind(lapply(LondonWardsSF, class)))
+varlist$id <- seq(1,nrow(varlist))
+
+qplot(AvgGCSE201, data = LondonWardsSF, geom = "histogram")
+```
+
+```{r message=FALSE, warning=FALSE}
+qplot(UnauthAbse, data = LondonWardsSF, gemo = "histogram")
+```
+
+```{r}
+#OK, the variables look normally distributed. Would we expect there to be a relationship?
+
+qplot(UnauthAbse, AvgGCSE201, data = LondonWardsSF, geom = "point") + stat_smooth(method="lm", se=FALSE, size=1)
+```
+
+2. Fit a linear model to your data
+```{r}
+#It looks like there is a negative relationship, so can we discover exactly what this relationship is using a linear regression model (we actually fitted one above to create the blue line)
+library(broom)
+
+#to fit the linear regrssion model, use the lm() function
+model1 <- lm(AvgGCSE201 ~ UnauthAbse, data = LondonWardsSF)
+#write the results out into a dataframe
+model1_res <- tidy(model1)
+
+#examine the results
+summary(model1)
+```
+
+```{r}
+#examine some of the diagnostic plots to see if there is any patterning in the residuals
+plot(model1)
+```
+
+3. Interpreting the results of the model summary
+* The coefficient (estimate) in the summary() table shows that(on average) for a 1 unit (day) increase in unauthorised absence from school, there is a reduction in the average GCSE point score of -29.874.
+
+* The p-values for the intercept and the coefficient are highly statistically significant (<0.001) so we can rely on the relationship that is being observed.
+
+* The adjusted R-squared statistic is 0.38, which tells us that 38% of the variation in GCSE scores across Wards in London can be explained by variation in unauthorised absence from school (which is quite a lot for a single variable).
+
+* Interrogating the last graph in plot(model1)which is a scatter plot of fitted values (the model estimates achieved by plugging the values and coefficients back into the regression equation) against standardised residuals, we can see no apparent patterns in the cloud of points, which suggests the model has not violated any important assumptions.
+
+For more detail about interpreting the model outputs here, try this resource:
+
+http://blog.yhat.com/posts/r-lm-summary.html
+
+In addtion, the two papers by Dunn (1989) and Jones (1984) on Moodle are old, but very good!
+
+https://doi.org/10.1080/03098268908709055 
+
+Testing for Spatial Patterns
+Right, so our model looks OK - on the face of it. However, we should also test that there is not any spatial clustering of residuals.
+
+We should plot the residuals on a map to see if there is any obvious spatial clustering.
+
+```{r}
+library(tmap)
+
+#save the residuals into your dataframe
+LondonWardsSF$model1_resids <- model1$residuals
+#now plot the residuals
+tmap_mode("plot")
+qtm(LondonWardsSF, fill = "model1_resids")
+```
+
+OK, so no obvious problems visually. Can we confirm this statistically just to make sure?
+
+If you remember back to a couple of lectures ago, we can test for spatial patterns (spatial autocorrelation) using the Moran’s I statistic. Let’s try that…
+
+```{r}
+library(spdep)
+library(sp)
+library(sf)
+#####
+LondonWards <- as(LondonWardsSF,"Spatial")
+#First calculate the centroids of all Wards in London
+coordsW <- coordinates(LondonWards)
+plot(coordsW)
+```
+
+```{r}
+#Now we need to generate a spatial weights matrix (remember from the lecture). We'll start with a simple binary matrix of queen's case neighbours
+#create a neighbours list
+LWard_nb <- poly2nb(LondonWards, queen=T)
+#plot them
+plot(LWard_nb, coordinates(coordsW), col="red")
+#add a map underneath
+plot(LondonWards, add=T)
+```
+
+```{r}
+#create a spatial weights object from these weights
+Lward.lw <- nb2listw(LWard_nb, style="C")
+#now run a moran's I test on the residuals
+moran.test(LondonWards@data$model1_resids, Lward.lw)
+```
+
+OK, so here we have a statistically significant but relatively weak indication that there is some spatial clustering of residual values. A value of 0.30 (1 being perfect spatial autocorrelation, 0 being none at all) shows that there is some evidence that high residual values cluster near high values and low residual values cluster near lower values.
+
+So what does this mean?
+If you recall, the residual values are the points in the scatter plot that do not fall along the blue regression line…
+
+```{r}
+qplot(UnauthAbse, AvgGCSE201, data = LondonWardsSF, geom = "point") + stat_smooth(method="lm", se=FALSE, size=1)
+```
+
+These are the wards in London where either high unauthorised absence rates do no necessarily lead to lower GCSE scores, or low unauthorised rates do not necessarily lead to higher GCSE scores. If these places cluster in space, then there might be some unobserved underlying factor causing this. This is important is it means that the assumption of independence that regression models rely upon might be violated.
+
+Now in our case here, there is not a clear violation of spatial independence, but it is certainly hinted at.
+
+4. Investigating further - Dummy Variables
+What if instead of fitting one line to our cloud of points, we could fit several depending on whether the Wards we were analysing fell into some or other group. What if the relationship between attending school and achieving good exam results varied between inner and outer London, for example. Could we test for that? Well yes we can - quite easily in fact.
+
+If we colour the points representing Wards for Inner and Outer London differently, we can start to see that there might be something interesting going on. There seems to be a stronger relationship between absence and GCSE scores in Outer London than Inner London. We can test for this in a standard linear regression model.
+
+```{r}
+p <- ggplot(LondonWardsSF, aes(x=UnauthAbse, y=AvgGCSE201))
+p + geom_point(aes(colour = InnerOuter))
+```
+
+Dummy variables are always categorical data (inner or outer London, or red / blue etc.). When we incorporate them into a regression model, they serve the purpose of splitting our analysis into groups. In the graph above, it would mean, effectively, having a separate regression line for the red points and a separate line for the blue points.
+
+```{r}
+#first, let's make sure R is reading our InnerOuter variable as a factor
+LondonWardsSF$InnerOuter <- as.factor(LondonWardsSF$InnerOuter)
+
+#now run the model
+model1_dummy <- lm(AvgGCSE201 ~ UnauthAbse + InnerOuter, data = LondonWardsSF)
+
+summary(model1_dummy)
+```
+
+So how can we interpret this?
+
+Well, the dummy variable is statistically significant and the coefficient tells us the difference between the two groups (Inner and Outer London) we are comparing. In this case, it is telling us that living in a Ward in outer London will improve your average GCSE score by 4.89 points, on average, compared to if you lived in Inner London. The R-squared has increased slightly, but not by much.
+
+You will notice that despite there being two values in our dummy variable (Inner and Outer), we only get one coefficient. This is because with dummy variables, one value is always considered to be the control (comparison/reference) group. In this case we are comparing Outer London to Inner London. If our dummy variable had more than 2 levels we would have more coefficients, but always one as the reference.
+
+The order in which the dummy comparisons are made is determined by what is known as a ‘contrast matrix’. This determines the treatment group (1) and the control (reference) group (0). We can view the contrast matrix using the contrasts() function:
+
+```{r}
+contrasts(LondonWardsSF$InnerOuter)
+```
+
+If we want to change the reference group, there are various ways of doing this. We can use the contrasts() function, or we can use the  relevel() function. Let’s try it:
+
+```{r}
+LondonWardsSF$InnerOuter <- relevel(LondonWardsSF$InnerOuter, ref="Outer")
+
+model1_dummy <- lm(AvgGCSE201 ~ UnauthAbse + InnerOuter, data = LondonWardsSF)
+summary(model1_dummy)
+```
+
+You will notice that the only thing that has changed (-4.888) in the model is that the coefficient for the InnerOuter variable now relates to Inner London and is now negative (meaning that living in Inner London is likely to reduce your average GCSE score by 4.89 points compared to Outer London). The rest of the model is exactly the same.
+
+5. Investigating Further - Adding More Explanatory Variables
+
+Up until this point, the model we have fitted using lm()has been exactly the same as the scatter plot we drew at the beginning. The relationships shown in the statistical outputs of the model we can observe in scatter plot. One of the great things about regression models is they allow us to go beyond the simple 2-dimensional scatter plot and extend our anaysis into multiple dimensions. Bam!
+
+So let’s have a go…
+
+Hmmm, what other things might affect someone’s performance at school? If we look through our suite of other variables (here - https://rpubs.com/adam_dennett/228756) we can see that there are various candidates. Socio-economic deprivation might be a good candidate - employment is a proxy for this (employed people tend to be more well-off than unemployed people), so let’s try adding employment in. In our dataset we have a variable labelled ‘Employment’ which is the employment rate (as a %) for 16-64 year olds.
+
+First we need to check that our variable is normally distributed:
+
+```{r}
+p <- ggplot(LondonWardsSF, aes(x=Employment))
+p + geom_histogram()
+```
+
+Yep looks OK. The employment rate for 16-64 year olds looks relatively normally distributed.
+
+Now we should check that it’s not highly correlated with our other independent variables… (highly correlated independent variables will bias any results we get)
+
+```{r}
+install.packages("corrplot")
+library(corrplot)
+```
+
+```{r}
+#to check for correlations, we can create a correlation matrix and then visualise it using the corrplot package
+#first, convert LondonWardsSF to a data frame
+LondonWardsDF <- st_set_geometry(LondonWardsSF,NULL)
+cormat <- cor(LondonWardsDF[,8:72], use="complete.obs", method="pearson")
+corrplot(cormat, tl.col="black", tl.cex=0.4)
+
+```
+
+```{r}
+##ok quite big, let's go a bit smaller and selec just a few variables...
+cormat <- cor(LondonWardsDF[,c(28,60,61,71)], use="complete.obs", method="pearson")
+corrplot(cormat)
+```
+
+Right, so it doesn’t appear that unauthorised absence from school is too highly correlated with employment rate (moderate negative correlation - what is high correlation I hear you ask? Good question - we’ll go for 0.5 and above for now, but good question), so let’s put it into the model and see what it does to the analysis…
+
+Run the model again with a new variable added in.
+
+```{r}
+model2_dummy <- lm(AvgGCSE201 ~ UnauthAbse + Employment + InnerOuter, data = LondonWardsSF)
+
+summary(model2_dummy)
+```
+
+So, what do the model outputs tell us?
+
+The first thing to note is the new variable (employment) is significant (p-value is <0.001 or ***) and positive, which means that as the employment rate in a ward goes up, so does the average GCSE Score
+
+For a 1% increase in % of people employed in a Ward, we can expect a 0.76 point increase in the average GCSE score.
+
+The fit of the model represented by the R-squared score has improved to aroun 43% of the variation in GSCE scores now explained by the independent variables.
+
+Including employment in the model has increased the parameter value for the inner / outer London dummy variable.
+
+t-values are standardised coefficient values and give a sense of the importance of each independent variable - especially when measured on different scales (the coefficients relate to the unit of measurement) - from this we can see clearly that unauthorised absence is the most important variable, but employment is more important than the inner/outer London dummy variable.
+
+6. Building the optimum model
+
+As you might have guessed, we can keep going and add more and more variables (as long as they are not highly correlated with each other) to try and explain as much of our independent variable as possible.
+
+Task
+You should try and build the optimum model of GCSE performance from your data in your LondonWards dataset. Experiment with adding different variables - when building a regression model in this way, you are trying to hit a sweet spot between increasing your R-squared value as much as possible, but with as few explanatory variables as possible.
+
+A few things to watch out for…
+You should never just throw variables at a model without a good theoretical reason for why they might have an influence. Choose your variables carefully!
+
+Be prepared to take variables out of your model either if a new variable confounds (becomes more important than) earlier variables or turns out not to be significant.
+
+For example, let’s try adding the rate of drugs related crime (logged as it is a positively skewed variable, where as the log is normal) and the number of cars per household…
+
+```{r}
+model3_dummy <- lm(AvgGCSE201 ~ UnauthAbse + Employment + log(DrugsRate1) + CarsPerHH2 + InnerOuter, data = LondonWardsSF)
+
+summary(model3_dummy)
+```
+
+Interpretation
+OK, so now things are getting interesting. Our R-squared value has improved, but we can see that:
+
+Our drug related crime rate variable is insignificant. Perhaps unsurprising when we think very carefully about it - drugs related crime is relatively small-scale (compared to other crimes) and therefore unlikely to affect very many school children.
+
+Including a cars per household variable completely confounds the effects of the Inner/Outer London dummy variable. This does make sense as Inner/Outer London was always just a proxy for afluence which is captured far more effectively with the cars per household variable.
+
+Task - continued
+Keep experiementing with new explanatory variables until you are happy that you have built your optium model.
+
+When you have finished:
+
+write your residual values out to your LondonWardsSF dataframe
+plot your residuals on a map to check visually for spatial autocorrelation
+run a Moran’s I test to confirm the presence or otherwise of spatial autocorrelation.
+
+Task 3 - Geographically Weighted Regression Models (GWR)
+
+Here’s my final model from the last section:
+
+```{r}
+model_final <- lm(AvgGCSE201 ~ UnauthAbse + Employment + CarsPerHH2, data = LondonWardsSF)
+summary(model_final)
+```
+
+```{r}
+LondonWardsSF$model_final_res <- model_final$residuals
+plot(model_final)
+```
+
+```{r}
+qtm(LondonWardsSF, fill = "model_final_res")
+```
+
+```{r}
+LondonWards <- as(LondonWardsSF,"Spatial")
+moran.test(LondonWards@data$model1_resids, Lward.lw)
+```
+
+Now, we probably could stop at this point, but the Moran’s I test suggests that there might be a little spatial autocorrelation in the residuals, therefore it will be worth seeing if we can learn even more about the factors affecting school performance in London using some geographically weighted models.
+
+This part of the practical will only skirt the edges of GWR, for much more detail you should visit the GWR website which is produced and maintained by Prof Chris Brunsdon and Dr Martin Charlton who originally developed the technique - http://gwr.nuim.ie/
+
+There are various packages which will carry out GWR in R, for this pracical we we use spgwr (mainly because it was the first one I came across), although you could also use GWmodel or gwrr. At the end of this practical, you can test out these ideas in ArcGIS using the GWR toolset in the Spatial Statistics Toolbox - 
+
+I should also acknowledge the guide on GWR (accessible here: http://www.bris.ac.uk/cmpo/events/2009/segregation/gwr.pdf) produced by the University of Bristol, which was a great help when producing this exercise.
+
+```{r}
+install.packages("spgwr")
+library(spgwr)
+```
+
+```{r}
+#calculate kernel bandwidth
+GWRbandwidth <- gwr.sel(AvgGCSE201 ~ UnauthAbse + Employment + CarsPerHH2, data = LondonWards, coords=cbind(x,y),adapt=T) 
+```
+
+```{r}
+#run the gwr model
+gwr.model = gwr(AvgGCSE201 ~ UnauthAbse + Employment + CarsPerHH2, data=LondonWards, coords=cbind(x,y), adapt=GWRbandwidth, hatmatrix=TRUE, se.fit=TRUE) 
+```
+
+```{r}
+#print the results of the model
+gwr.model
+```
+
+The output from the GWR model reveals how the coefficients vary across the 625 Wards in our London Study region. You will see how the global coefficients are exactly the same as the coefficients in the earlier lm model. In this particular model (yours will look a little different if you have used different explanatory variables), if we take unauthorised absence from school, we can see that the coefficients range from a minimum value of -54.41 (1 unit change in unauthorised absence resulting in a drop in average GCSE score of -54.41) to +27.14 (1 unit change in unauthorised absence resulting in an increase in average GCSE score of +27.14). For half of the wards in the dataset, as unauthorised absence rises by 1 point, GCSE scores will decrease between -26.62 and -9.26 points (the inter-quartile range between the 1st Qu and the 3rd Qu).
+
+You will notice that the R-Squared value has improved - this is not uncommon for GWR models, but it doesn’t necessarily mean they are definitely better than global models. The small number of cases under the kernel means that GW models have been criticised.
+
+Coefficient ranges can also be seen for the other variables and they suggest some interesting spatial patterning. To explore this we can plot the GWR coefficients for different variables. Firstly we can attach the coefficients to our original dataframe - this can be achieved simply as the coefficients for each ward appear in the same order in our spatial points dataframe as they do in the original dataframe.
+
+```{r}
+results<-as.data.frame(gwr.model$SDF)
+head(results)
+```
+
+```{r}
+#attach coefficients to original dataframe
+LondonWards@data$coefUnauthAbse<-results$UnauthAbse
+LondonWards@data$coefEmployment<-results$Employment
+LondonWards@data$coefCarsPerHH2<-results$CarsPerHH2
+```
+
+```{r}
+tm_shape(LondonWards) +
+  tm_polygons(col = "coefUnauthAbse", palette = "RdBu")
+```
+
+```{r}
+tm_shape(LondonWards) +
+  tm_polygons(col = "coefEmployment", palette = "RdBu")
+```
+
+```{r}
+tm_shape(LondonWards) +
+  tm_polygons(col = "coefCarsPerHH2", palette = "RdBu")
+```
+
+Taking the first plot, which is for the unauthorised absence coefficients, we can see that for the majority of boroughs in London, there is the negative relationship we would expect - i.e. as unauthorised absence goes up, exam scores go down. For three boroughs (Westminster, Kensington & Chelsea and Hammersmith and Fulham - the richest in London), however, the relationship is positive - as unauthorised school absence increases, so does average GCSE score. This is a very interesting pattern and counterintuitive pattern, but may partly be explained the multiple homes owned by many living in these boroughs (students living in different parts of the country and indeed the world for significant periods of the year) and the over representation of private schooling of those living in these areas. If this is not the case and unauthorised absence from school is reflecting the unauthorised absence of poorer students attending local, inner city schools, then high GCSE grades may also reflect the achievements of those who are sent away to expensive fee-paying schools elsewhere in the country and who return to their parental homes later in the year. Either way, these factors could explain these results.
+
+Of course, these results may not be statistically significant across the whole of London. Roughly speaking, if a coefficient estimate is more than 2 standard errors away from zero, then it is “statistically significant”.
+
+To calculate standard errors, for each variable you can use a formula similar to this:
+
+```{r}
+sigTest = abs(gwr.model$SDF$UnauthAbse) -2 * gwr.model$SDF$UnauthAbse_se 
+
+LondonWards$GWRUnauthSig<-sigTest
+
+#tmaptools::palette_explorer()
+```
+
+If this is greater than zero (i.e. the estimate is more than two standard errors away from zero), it is very unlikely that the true value is zero, i.e. it is statistically significant (at nearly the 95% confidence level)
+
+You should now calculate these for each variable in your GWR model and See if you can plot them on a map, for example:
+
+```{r}
+tm_shape(LondonWards) +
+  tm_polygons(col = "GWRUnauthSig", palette = "RdYlBu")
+```
+
+From the results of your GWR exercise, what are you able to conclude about the geographical variation in your explanatory variables when predicting your dependent variable?
+
+
+
+
