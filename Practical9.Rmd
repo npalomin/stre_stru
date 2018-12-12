@@ -1,6 +1,8 @@
 ---
 title: "Practical9"
-output: html_notebook
+output:
+  html_document:
+    df_print: paged
 ---
 
 ##### Spatial Inferential Statistics
@@ -12,9 +14,17 @@ library(rgdal)
 library(tidyverse)
 library(sf)
 library(ggplot2)
+library(GISTools)
+library(rgdal)
 ```
 
 ```{r}
+writeOGR(LondonWards, driver="ESRI Shapefile", dsn="/Volumes/ucfnnap/CASA_GIS and Sc/LondonWards.shp", layer="LondonWards")
+```
+
+
+```{r}
+LondonWards <- readOGR(LondonWards, dsn="/Volumes/ucfnnap/CASA_GIS and Sc/LondonWards.shp", layer="LondonWards")
 LondonWardsSF <- st_as_sf(LondonWards)
 extradata <- read_csv("https://www.dropbox.com/s/qay9q1jwpffxcqj/LondonAdditionalDataFixed.csv?raw=1")
 LondonWardsSF <- merge(LondonWardsSF, extradata, by.x = "WD11CD", by.y = "Wardcode")
@@ -254,7 +264,7 @@ Yep looks OK. The employment rate for 16-64 year olds looks relatively normally 
 Now we should check that it’s not highly correlated with our other independent variables… (highly correlated independent variables will bias any results we get)
 
 ```{r}
-install.packages("corrplot")
+# install.packages("corrplot")
 library(corrplot)
 ```
 
@@ -363,7 +373,7 @@ There are various packages which will carry out GWR in R, for this pracical we w
 I should also acknowledge the guide on GWR (accessible here: http://www.bris.ac.uk/cmpo/events/2009/segregation/gwr.pdf) produced by the University of Bristol, which was a great help when producing this exercise.
 
 ```{r}
-install.packages("spgwr")
+# install.packages("spgwr")
 library(spgwr)
 ```
 

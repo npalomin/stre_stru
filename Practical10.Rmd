@@ -1,0 +1,242 @@
+---
+title: "Parctical10"
+author: "AnaBasiri"
+date: "8 December 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+Surface Interpolation in R
+========================================================
+In this practical we use London air pollution data. you may go to this website and download 2013 emission data:  https://data.london.gov.uk/dataset/london-atmospheric-emissions-inventory-2013
+
+
+```{r message=FALSE}
+#setwd("C:/AnaBasiri/Teaching/GISModule2018AnaBasiri/Week10/Practical8")
+#install.packages("gstat")
+library(ggplot2)
+library(gstat)
+library(sp)
+library(maptools)
+#install.packages("sf")
+library(sf)
+```
+
+Your Airpollution data have lat and lon for the point where the pollutants are measured. If you wish to download data from teh link I shared, please make sure your columns names are renamed to x and y or simply use the 2008LondonAirData file I put on Moodle. This file has got a small portion of all air data quality data. Let's read the csv file and then convert it to a spatial points data frame using the coordinates function in the sp package.
+
+```{r Read Data and Create Spatial Points Data Frame}
+#read in some data that already has x and y coordinates attached to it 
+AirData <- read.csv("/Volumes/ucfnnap/CASA_GIS and Sc/wk10/Practical10-2018-20181212/Practical10-2018/RPart/2008LondonAirData.csv")
+
+
+
+#In our case the coordinates columns are already called x and y, so we will use these
+#If your x and y has got any thing but float/numeric data type, edit!
+
+#convert this basic data frame into a spatial points data frame
+coordinates(AirData)= ~x+y
+
+plot(AirData)
+```
+
+We will now create a grid onto which we will interpolate - this can be done in 2 ways. The first will set the grid using the range of the points data. This is OK, but our interpolation grid will not cover the full extent of our area. 
+
+```{r}
+## 1. Create a grid from the values in your points dataframe
+## first get the range in data
+x.range <- as.integer(range(AirData@coords[,1]))
+y.range <- as.integer(range(AirData@coords[,2]))
+```
+
+The second method lets you set your own grid extent using the locator() function. I put this part in comment and so if you wish to try please make sure you run them! After entering (4) into the function, you should click the four corners of a bounding box larger than the extent of London. I put the second way in commen These four points will be printed to the console and you can then enter them into your x.range and y.range variables:
+
+
+```{r}
+##2. Create a grid with a slightly larger extent
+plot(AirData)
+#use the locator to click 4 points beyond the extent of the plot
+#and use those to set your x and y extents
+locator(4)
+x.range <- as.integer(c(497509.5,563596.8))
+y.range <- as.integer(c(148358.5,207326.7))
+```
+
+We will now create a grid with the extent set to our x and y ranges. It is at this point that we set the resolution of the grid. Higher resolution (smaller grid cells) will create a smoother looking grid, but will involve more computation. As British National Grid is in metres, the range is set in metres. 
+
+```{r}
+## now expand your range to a grid with spacing that you'd like to use in your interpolation
+#here we will use 150m grid cells:
+grd <- expand.grid(x=seq(from=x.range[1], to=x.range[2], by=150), y=seq(from=y.range[1], to=y.range[2], by=150))
+
+## convert grid to SpatialPixel class
+coordinates(grd) <- ~ x+y
+gridded(grd) <- TRUE
+
+## test it out - this is a good way of checking that your sample points are all well within your grid. If they are not, try some different values in you r x and y ranges:
+plot(grd, cex=0.5)
+
+points(AirData, pch=1, col='red', cex=0.05)
+title("Interpolation Grid and Sample Points")
+```
+
+Inverse Distance Weighting
+---------------------------------------
+
+Now we have set up our points and a grid to interpolate onto, we are ready carry out some interpolation. The first method we will try is inverse distance weighting (IDW) as this will not require any special modelling of spatial relationships. 
+
+To generate a surface using inverse distance weighting, use the IDW function in gstat. Check the help file for IDW - `?idw` - for information about what this formula is doing. 
+
+The surface being generated here for one variable (Total) across the whole London area. Feel free to experiment with smoothing alternative variables.
+
+```{r}
+
+idw<-idw(formula=Total ~ 1, locations=AirData, newdata=grd)
+idw.output=as.data.frame(idw)
+names(idw.output)[1:3]<-c("x","y","Total")
+plot (idw)
+
+plot<-ggplot(data=idw.output,aes(x=x,y=y))
+layer1<-c(geom_tile(data=idw.output,aes(fill=Total)))#then create a tile layer and fill with predicted values
+plot+layer1+scale_fill_gradient(low="#FEEBE2", high="#7A0177")
+
+```
+
+
+You might want to experiment with other variables or a few of the parameters in IDW or different grid resolutions. 
+
+Kriging
+--------------------------------
+
+As you heard in the lecture, Kriging is a little more involved than IDW as it requires the construction of a semivariogram model to describe the spatial autocorrelation pattern for your particular variable. 
+
+We'll start with a variogram cloud for the Total emission. If there are too many points there is a chance that some seem to be duplicated so first remove them and then use Krig() function. I commented this line but you may need to use it, to avoid having your covariance matrix become singular. 
+```{r}
+AirData1 <- AirData[-zerodist(AirData)[,1],]
+variogcloud<-variogram(Total~1, locations=AirData1, data=AirData1, cloud=TRUE)
+plot(variogcloud)
+```
+
+The values in the cloud can be binned into lags with and plotted with a very similar function
+```{r}
+semivariog<-variogram(Total~1, locations = AirData1, data=AirData1)
+plot(semivariog)
+semivariog
+```
+
+From the empirical semivariogram plot and the information contained in the semivariog gstat object, we can estimate the sill, range and nugget to use in our model semivariogram.
+
+In this case, the range (the point on the distance axis where the semivariogram starts to level off) is around the value of 20000- so we'll use Range = 25000
+
+The Sill (the point on the y axis where the semivariogram starts to level off) is around 20000.
+
+The nugget looks to be around 20000 (so the partial sill is around 20000).
+
+Using this information we'll generate a model semivariogram using the vgm() function in gstat.
+
+```{r}
+#first check the range of model shapes available in vgm
+vgm()
+#the data looks like it might be an exponential shape0, so we will try that first with the values estimated from the empirical 
+model.variog<-vgm(psill=200, model="Gau", nugget=200, range=2000)
+```
+
+We can now fit this model to a sample variogram to see how well it fits and plot it
+```{r}
+fit.variog<-fit.variogram(semivariog, model.variog)
+plot(semivariog, fit.variog)
+```
+
+If you like, try some alternative models to see if the fit is any better
+```{r}
+model.variog<-vgm(psill=2000, model="Exp", nugget=2000, range=25000)
+fit.variog<-fit.variogram(semivariog, model.variog)
+plot(semivariog, fit.variog)
+model.variog<-vgm(psill=20000, model="Sph", nugget=20000, range=25000)
+fit.variog<-fit.variogram(semivariog, model.variog)
+plot(semivariog, fit.variog)
+
+
+
+```
+
+The  Sph model seems like a good fit, so we will proceed with that model. Feel free to pick the one that works for your data better.
+```{r}
+model.variog<-vgm(psill=20000, model="Sph", nugget=20000, range=25000)
+fit.variog<-fit.variogram(semivariog, model.variog)
+#?krige
+```
+
+Use the krige() function in gstat along with the model semivariogram just generated to generate an ordinary/simple Kriged surface - again, check `?krige` to see what the various options in the function are. If there are too many points there is a chance that some seem to be duplicated so first remove them and then use Krig() function. I commented this line but you may need to use it, to avoid having your covariance matrix become singular. 
+
+```{r}
+#AirData <- AirData[-zerodist(AirData)[,1],]
+#krig<-krige(formula=Total ~ 1, locations=AirData, newdata=grd, model=model.variog)
+#krig.output=as.data.frame(krig)
+#names(krig.output)[1:3]<-c("long","lat","Total")
+```
+
+Generate a plot of the kriged surface in ggplot2 in a similar way to before
+
+```{r}
+#plot<-ggplot(data=krig.output,aes(x=long,y=lat))#start with the base-plot and add the Kriged data to it
+#layer1<-c(geom_tile(data=krig.output,aes(fill=Total)))#then create a tile layer and fill with predicted
+
+#plot+layer1+scale_fill_gradient(low="#FEEBE2", high="#7A0177")
+```
+
+This completes your very short guide to creating spatial surfaces in R. Using your new knowledge about constucting and interpreting semivariograms and, you should try and replicate these surfaces in ArcGIS or QGIS. 
+
+If you have 3D data you can use some libraries like plot3D, rgl, plotly to get a 3D plot. 
+```{r}
+#install.packages("plotly")
+#install.packages("lattice")
+#install.packages("plot3D")
+#install.packages("rgl")
+#impliment packages within the script
+library(plotly)
+library(lattice)
+library(plot3D)
+library(rgl)
+```
+
+The following codes are examples of two basic ways of plotting contour maps. In this part we are using R studio's volcano dataset that represents Maunga Whau (Mt Eden). This data set represents the topographic informatio on a 10x10 meter grid. 
+A contour line map is created through the use of the contour( ) function. 
+```{r}
+#The contour line creates a basic contour map with lines in blue
+contour(volcano, main = "Contour", col = "blue")
+#Creates a map that represents elevation change with a color gradient
+filled.contour(volcano, color.palette = terrain.colors, main = "TrainColour")
+```
+plot3D package allows us to take both of these contour map representations and merge them into a single map that demonstrates the elevation with a color gradient and contour lines simultaneously.
+```{r}
+
+#install.packages("plot3D")
+library(plot3D)
+#Create a composite map consisting of a 3D and a 2D contour representation
+#Plot the surface based on elevation data
+persp3D(z = volcano, zlim = c(-60, 200), phi = 20,
+        colkey = list(length = 0.2, width = 0.4, shift = 0.15,
+                      cex.axis = 0.8, cex.clab = 0.85), lighting = TRUE, lphi = 90,
+        clab = c("", "Height", "m"), bty = "f", plot = FALSE)
+#Create a gradient variable for longitude
+canoData <- volcano[-1, ] - volcano[-nrow(volcano), ]
+#Create a contour map base with the same color scheme as the 3D model
+image3D(z = -60, colvar = canoData/10, add = TRUE,
+        colkey = list(length = 0.2, width = 0.4, shift = -0.15,
+                      cex.axis = 0.8, cex.clab = 0.85),
+        clab = c("", "Gradient", "m/m"), plot = FALSE)
+#Add contour lines
+contour3D(z = -60 + 0.01, colvar = canoData/10, add = TRUE,
+          col = "black", plot = TRUE)
+```
+
+
+
+
+
+
