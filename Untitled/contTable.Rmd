@@ -1,0 +1,54 @@
+---
+title: "GIS and Science summary"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+    number_sections: yes
+  html_notebook:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+    toc_float: no
+---
+<style>
+* {
+  font-family: "Palatino"
+}
+
+h1{
+    font-size: 190%
+}
+
+h2{
+    font-size: 160%
+}
+
+h3{
+    font-size: 150%
+}
+
+h4{
+    font-size: 130%
+}
+
+h5{
+    font-size: 110%
+}
+
+h6{
+    font-size: 90%
+}
+</style>
+
+# Summary table 2018
+
+```{r}
+library(readxl)
+library(htmlTable)
+contTable <- read_excel("~/Documents/R_GitHub/stre_stru/GISS_contTable.xlsx")
+
+htmlTable(contTable, rnames=F, align="l", col.columns = c("none", "#F7F7F7"), css.cell="padding:1em")
+```
+
