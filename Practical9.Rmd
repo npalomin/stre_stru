@@ -19,12 +19,7 @@ library(rgdal)
 ```
 
 ```{r}
-writeOGR(LondonWards, driver="ESRI Shapefile", dsn="/Volumes/ucfnnap/CASA_GIS and Sc/LondonWards.shp", layer="LondonWards")
-```
-
-
-```{r}
-LondonWards <- readOGR(LondonWards, dsn="/Volumes/ucfnnap/CASA_GIS and Sc/LondonWards.shp", layer="LondonWards")
+LondonWards <- st_read(dsn="/Volumes/ucfnnap/CASA_GIS and Sc/wk9/LondonWards.shp", layer="LondonWards")
 LondonWardsSF <- st_as_sf(LondonWards)
 extradata <- read_csv("https://www.dropbox.com/s/qay9q1jwpffxcqj/LondonAdditionalDataFixed.csv?raw=1")
 LondonWardsSF <- merge(LondonWardsSF, extradata, by.x = "WD11CD", by.y = "Wardcode")
@@ -50,8 +45,9 @@ summary(LondonWardsSF$UnauthAbse)
 
 ```{r}
 attach(LondonWardsSF)
-LondonWardsSF$GCSE_recode <- recode(AvgGCSE201,409.1,358.3,332.3)
-LondonWardsSF$unauth_recode <- recode(UnauthAbse,2.4675,1.4105,0.8215)
+# recode High, Medium, Low
+LondonWardsSF$GCSE_recode <- recode(LondonWardsSF$AvgGCSE201,409.1,358.3,332.3)
+LondonWardsSF$unauth_recode <- recode(LondonWardsSF$UnauthAbse,2.4675,1.4105,0.8215)
 ```
 
 H0  = “There is no relationship between low average GCSE scores in London wards and high levels of unauthorised school absence.”
@@ -90,17 +86,17 @@ Task 2: A Parametric Test - a linear regression model
 varlist <- data.frame(cbind(lapply(LondonWardsSF, class)))
 varlist$id <- seq(1,nrow(varlist))
 
-qplot(AvgGCSE201, data = LondonWardsSF, geom = "histogram")
+qplot(LondonWardsSF$AvgGCSE201, data = LondonWardsSF, geom = "histogram")
 ```
 
 ```{r message=FALSE, warning=FALSE}
-qplot(UnauthAbse, data = LondonWardsSF, gemo = "histogram")
+qplot(LondonWardsSF$UnauthAbse, data = LondonWardsSF, gemo = "histogram")
 ```
 
 ```{r}
 #OK, the variables look normally distributed. Would we expect there to be a relationship?
 
-qplot(UnauthAbse, AvgGCSE201, data = LondonWardsSF, geom = "point") + stat_smooth(method="lm", se=FALSE, size=1)
+qplot(LondonWardsSF$UnauthAbse, LondonWardsSF$AvgGCSE201, data = LondonWardsSF, geom = "point") + stat_smooth(method="lm", se=FALSE, size=1)
 ```
 
 2. Fit a linear model to your data
@@ -109,7 +105,7 @@ qplot(UnauthAbse, AvgGCSE201, data = LondonWardsSF, geom = "point") + stat_smoot
 library(broom)
 
 #to fit the linear regrssion model, use the lm() function
-model1 <- lm(AvgGCSE201 ~ UnauthAbse, data = LondonWardsSF)
+model1 <- lm(LondonWardsSF$AvgGCSE201 ~ LondonWardsSF$UnauthAbse, data = LondonWardsSF)
 #write the results out into a dataframe
 model1_res <- tidy(model1)
 
@@ -192,7 +188,7 @@ So what does this mean?
 If you recall, the residual values are the points in the scatter plot that do not fall along the blue regression line…
 
 ```{r}
-qplot(UnauthAbse, AvgGCSE201, data = LondonWardsSF, geom = "point") + stat_smooth(method="lm", se=FALSE, size=1)
+qplot(LondonWardsSF$UnauthAbse, LondonWardsSF$AvgGCSE201, data = LondonWardsSF, geom = "point") + stat_smooth(method="lm", se=FALSE, size=1)
 ```
 
 These are the wards in London where either high unauthorised absence rates do no necessarily lead to lower GCSE scores, or low unauthorised rates do not necessarily lead to higher GCSE scores. If these places cluster in space, then there might be some unobserved underlying factor causing this. This is important is it means that the assumption of independence that regression models rely upon might be violated.
@@ -205,7 +201,7 @@ What if instead of fitting one line to our cloud of points, we could fit several
 If we colour the points representing Wards for Inner and Outer London differently, we can start to see that there might be something interesting going on. There seems to be a stronger relationship between absence and GCSE scores in Outer London than Inner London. We can test for this in a standard linear regression model.
 
 ```{r}
-p <- ggplot(LondonWardsSF, aes(x=UnauthAbse, y=AvgGCSE201))
+p <- ggplot(LondonWardsSF, aes(x=LondonWardsSF$UnauthAbse, y=LondonWardsSF$AvgGCSE201))
 p + geom_point(aes(colour = InnerOuter))
 ```
 
@@ -216,7 +212,7 @@ Dummy variables are always categorical data (inner or outer London, or red / blu
 LondonWardsSF$InnerOuter <- as.factor(LondonWardsSF$InnerOuter)
 
 #now run the model
-model1_dummy <- lm(AvgGCSE201 ~ UnauthAbse + InnerOuter, data = LondonWardsSF)
+model1_dummy <- lm(LondonWardsSF$AvgGCSE201 ~ LondonWardsSF$UnauthAbse + InnerOuter, data = LondonWardsSF)
 
 summary(model1_dummy)
 ```
@@ -238,7 +234,7 @@ If we want to change the reference group, there are various ways of doing this. 
 ```{r}
 LondonWardsSF$InnerOuter <- relevel(LondonWardsSF$InnerOuter, ref="Outer")
 
-model1_dummy <- lm(AvgGCSE201 ~ UnauthAbse + InnerOuter, data = LondonWardsSF)
+model1_dummy <- lm(LondonWardsSF$AvgGCSE201 ~ LondonWardsSF$UnauthAbse + InnerOuter, data = LondonWardsSF)
 summary(model1_dummy)
 ```
 
@@ -255,7 +251,7 @@ Hmmm, what other things might affect someone’s performance at school? If we lo
 First we need to check that our variable is normally distributed:
 
 ```{r}
-p <- ggplot(LondonWardsSF, aes(x=Employment))
+p <- ggplot(LondonWardsSF, aes(x=LondonWardsSF$Emplymn))
 p + geom_histogram()
 ```
 
@@ -264,7 +260,7 @@ Yep looks OK. The employment rate for 16-64 year olds looks relatively normally 
 Now we should check that it’s not highly correlated with our other independent variables… (highly correlated independent variables will bias any results we get)
 
 ```{r}
-# install.packages("corrplot")
+#install.packages("corrplot")
 library(corrplot)
 ```
 
@@ -288,7 +284,7 @@ Right, so it doesn’t appear that unauthorised absence from school is too highl
 Run the model again with a new variable added in.
 
 ```{r}
-model2_dummy <- lm(AvgGCSE201 ~ UnauthAbse + Employment + InnerOuter, data = LondonWardsSF)
+model2_dummy <- lm(LondonWardsSF$AvgGCSE201 ~ LondonWardsSF$UnauthAbse + LondonWardsSF$Emplymn + InnerOuter, data = LondonWardsSF)
 
 summary(model2_dummy)
 ```
@@ -320,7 +316,7 @@ Be prepared to take variables out of your model either if a new variable confoun
 For example, let’s try adding the rate of drugs related crime (logged as it is a positively skewed variable, where as the log is normal) and the number of cars per household…
 
 ```{r}
-model3_dummy <- lm(AvgGCSE201 ~ UnauthAbse + Employment + log(DrugsRate1) + CarsPerHH2 + InnerOuter, data = LondonWardsSF)
+model3_dummy <- lm(LondonWardsSF$AvgGCSE201 ~ LondonWardsSF$UnauthAbse + LondonWardsSF$Emplymn + log(LondonWardsSF$DrgsRt1) + LondonWardsSF$CrsPHH2 + InnerOuter, data = LondonWardsSF)
 
 summary(model3_dummy)
 ```
@@ -346,7 +342,7 @@ Task 3 - Geographically Weighted Regression Models (GWR)
 Here’s my final model from the last section:
 
 ```{r}
-model_final <- lm(AvgGCSE201 ~ UnauthAbse + Employment + CarsPerHH2, data = LondonWardsSF)
+model_final <- lm(LondonWardsSF$AvgGCSE201 ~ LondonWardsSF$UnauthAbse + LondonWardsSF$Emplymn + LondonWardsSF$CrsPHH2, data = LondonWardsSF)
 summary(model_final)
 ```
 
@@ -373,18 +369,18 @@ There are various packages which will carry out GWR in R, for this pracical we w
 I should also acknowledge the guide on GWR (accessible here: http://www.bris.ac.uk/cmpo/events/2009/segregation/gwr.pdf) produced by the University of Bristol, which was a great help when producing this exercise.
 
 ```{r}
-# install.packages("spgwr")
+#install.packages("spgwr")
 library(spgwr)
 ```
 
 ```{r}
 #calculate kernel bandwidth
-GWRbandwidth <- gwr.sel(AvgGCSE201 ~ UnauthAbse + Employment + CarsPerHH2, data = LondonWards, coords=cbind(x,y),adapt=T) 
+GWRbandwidth <- gwr.sel(LondonWardsSF$AvgGCSE201 ~ LondonWardsSF$UnauthAbse + LondonWardsSF$Emplymn + LondonWardsSF$CrsPHH2, data = LondonWards, coords=cbind(x,y),adapt=T) 
 ```
 
 ```{r}
 #run the gwr model
-gwr.model = gwr(AvgGCSE201 ~ UnauthAbse + Employment + CarsPerHH2, data=LondonWards, coords=cbind(x,y), adapt=GWRbandwidth, hatmatrix=TRUE, se.fit=TRUE) 
+gwr.model = gwr(LondonWardsSF$AvgGCSE201 ~ LondonWardsSF$UnauthAbse + LondonWardsSF$Emplymn + LondonWardsSF$CrsPHH2, data=LondonWards, coords=cbind(x,y), adapt=GWRbandwidth, hatmatrix=TRUE, se.fit=TRUE) 
 ```
 
 ```{r}
@@ -402,13 +398,21 @@ Coefficient ranges can also be seen for the other variables and they suggest som
 results<-as.data.frame(gwr.model$SDF)
 head(results)
 ```
+```{r}
+names(results)
+```
 
 ```{r}
 #attach coefficients to original dataframe
-LondonWards@data$coefUnauthAbse<-results$UnauthAbse
-LondonWards@data$coefEmployment<-results$Employment
-LondonWards@data$coefCarsPerHH2<-results$CarsPerHH2
+LondonWards@data$coefUnauthAbse<-results$LondonWardsSF.UnauthAbse
+LondonWards@data$coefEmployment<-results$LondonWardsSF.Emplymn
+LondonWards@data$coefCarsPerHH2<-results$LondonWardsSF.CrsPHH2
 ```
+
+```{r}
+names(LondonWards@data)
+```
+
 
 ```{r}
 tm_shape(LondonWards) +
@@ -432,7 +436,7 @@ Of course, these results may not be statistically significant across the whole o
 To calculate standard errors, for each variable you can use a formula similar to this:
 
 ```{r}
-sigTest = abs(gwr.model$SDF$UnauthAbse) -2 * gwr.model$SDF$UnauthAbse_se 
+sigTest = abs(gwr.model$SDF$LondonWardsSF.UnauthAbse) -2 * gwr.model$SDF$LondonWardsSF.UnauthAbse_se 
 
 LondonWards$GWRUnauthSig<-sigTest
 

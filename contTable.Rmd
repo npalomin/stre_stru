@@ -1,0 +1,65 @@
+---
+title: "GIS and Science summary"
+output:
+  html_notebook:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+    toc_float: no
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+    number_sections: yes
+---
+<style>
+* {
+  font-family: "Palatino"
+}
+
+h1{
+    font-size: 190%
+}
+
+h2{
+    font-size: 160%
+}
+
+h3{
+    font-size: 150%
+}
+
+h4{
+    font-size: 130%
+}
+
+h5{
+    font-size: 110%
+}
+
+h6{
+    font-size: 90%
+}
+</style>
+
+# Summary table 2018
+
+```{r}
+headers <- c('wk','Lecture','Lecture file', 'Practical', 'Practical file')
+w1 <- c('1', 'Introduction to Spatial Data','/Volumes/ucfnnap/CASA_GIS and Sc/wk1','Introduction to geographic information
+sources in the UK','/Volumes/ucfnnap/CASA_GIS and Sc/wk1')
+```
+
+```{r}
+cont <- data.frame(headers, w1)
+htmlTable(cont, rnames=F, align="l", col.columns = c("none", "#F7F7F7"), css.cell="padding:1em")
+```
+
+
+# Analysis
+
+# Conclusion
+
+# References
+
+# Bibliography
