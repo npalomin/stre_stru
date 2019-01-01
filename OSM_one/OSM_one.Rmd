@@ -1,0 +1,113 @@
+---
+title: "OSM_one"
+output:
+  html_notebook:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+    toc_float: no
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+    number_sections: yes
+---
+<style>
+* {
+  font-family: "Palatino"
+}
+
+h1{
+    font-size: 190%
+}
+
+h2{
+    font-size: 160%
+}
+
+h3{
+    font-size: 150%
+}
+
+h4{
+    font-size: 130%
+}
+
+h5{
+    font-size: 110%
+}
+
+h6{
+    font-size: 90%
+}
+</style>
+
+```{r}
+#install.packages("osmdata")
+library(osmdata)
+library(sf)
+library(tmap)
+library(tmaptools)
+library(mapview)
+```
+
+```{r}
+segr <- opq(bbox = "london uk") %>%
+  add_osm_feature(key = "highway", value = "cycleway") %>%
+  add_osm_feature(key = "segregated", value = "yes") %>%
+  osmdata_sf()
+```
+
+```{r}
+class(segr)
+```
+
+```{r}
+segr_lines <- st_as_sf(segr[["osm_lines"]])
+tmap_mode("plot")
+qtm(segr_lines)
+```
+
+```{r}
+tmap_mode("view")
+sset <- segr_lines[1:100,1:5]
+tm_shape(segr_lines) +
+  tm_lines(col = "red", lwd = 12)
+```
+
+```{r}
+tmap_mode("plot")
+tm_shape(sset) +
+  tm_lines(col = "red", lwd = 2)
+```
+
+```{r}
+mapview(segr_lines)
+```
+
+```{r}
+#Clear plots
+if(!is.null(dev.list())) dev.off()
+
+# Clear console
+cat("\014") 
+
+# Clean workspace
+rm(list=ls())
+```
+
+
+parks = opq(bbox = "leeds uk") %>% 
+  add_osm_feature(key = "leisure", value = "park") %>% 
+  osmdata_sf()
+
+
+# Introduction
+
+# Analysis
+
+# Conclusion
+
+# References
+
+# Bibliography
